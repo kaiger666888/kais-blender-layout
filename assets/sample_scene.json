@@ -1,0 +1,40 @@
+{
+  "scene": {
+    "name": "warrior_dungeon",
+    "environment": "dungeon",
+    "lighting": {
+      "type": "dramatic",
+      "key_light": {"position": [5, 8, 3], "color": "warm"},
+      "fill_light": {"intensity": 0.3}
+    },
+    "camera": {
+      "position": [0, -5, 2],
+      "look_at": "warrior"
+    }
+  },
+  "characters": [
+    {
+      "model": "warrior",
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0],
+      "animation": "idle",
+      "animation_start": 0
+    }
+  ],
+  "props": [
+    {"model": "chest", "position": [2, 1, 0]},
+    {"model": "sword", "position": [0.5, 0, 0.5]}
+  ],
+  "timeline": [
+    {"frame": 0, "action": "warrior.idle"},
+    {"frame": 60, "action": "warrior.walk_forward"},
+    {"frame": 120, "action": "warrior.idle"}
+  ],
+  "render": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "frame_start": 0,
+    "frame_end": 250
+  }
+}
