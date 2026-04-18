@@ -130,6 +130,17 @@ def render_scene(
     a("        obj.scale = (sofa_scale, sofa_scale, sofa_scale)")
     a("bpy.context.view_layer.update()")
     a("")
+    # ═══ Assemble sofa: seat cushion onto base top ═══
+    a("# ── Assemble sofa components ──")
+    a("base=next((o for o in bpy.context.scene.objects if o.type=='MESH' and 'sofa_02_base' in o.name.lower()),None)")
+    a("seat=next((o for o in bpy.context.scene.objects if o.type=='MESH' and 'sofa_02_seat' in o.name.lower()),None)")
+    a("if base and seat:")
+    a("    b_mn,b_mx=get_aabb(base); s_mn,s_mx=get_aabb(seat)")
+    a("    if s_mn.z < b_mx.z - 0.01:")
+    a("        seat.location.z += b_mx.z - s_mn.z")
+    a("        bpy.context.view_layer.update()")
+    a(f"        sys.stderr.write(f'  Assembled seat onto base\\\\n')")
+    a("")
 
     # ═══ Characters ═══
     for ci, cb in enumerate(char_blocks):
