@@ -1,7 +1,7 @@
 ---
 name: kais-blender-layout
 version: 0.2.0
-description: "Blender 场景全流程引擎。AI 场景规划（自然语言→蓝图）+ 场景布局渲染（蓝图→图片）。角色+家具+HDRI+多机位，全自动化。触发词：blender-layout, 场景布局, 布景, layout, 场景渲染, 3D 布景, 场景规划, scene planning, scene composition, 分镜转场景, 场景蓝图"
+description: "Blender 场景全流程引擎。AI 场景规划（自然语言→蓝图）+ 场景布局渲染（蓝图→图片）。角色+家具+HDRI+多机位，全自动化。触发词：blender-layout, 场景布局, 布景, layout, 3D 布景, 场景规划, scene planning, scene composition, 分镜转场景, 场景蓝图, 场景搭建"
 ---
 
 # kais-blender-layout — Blender 场景全流程引擎
@@ -254,7 +254,7 @@ kais-camera (视频生成)
 **分工说明：**
 - **layout（本skill）**：场景规划 + 场景布局渲染（多角色+家具+HDRI+多机位）
 - **engine**：底层 API 服务，单角色动画/姿态渲染，资产管理
-- **scenecraft**：已合并入本 skill，不再独立维护
+- ~~**scenecraft**~~：已合并入本 skill（v0.2.0），不再独立维护
 
 ## 注意事项
 
