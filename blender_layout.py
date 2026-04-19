@@ -230,8 +230,10 @@ def render_scene(
         a(f"# ── Character {ci+1} ──")
 
         # Import animation FBX
+        a("_prev_arms = set(o.name for o in bpy.context.scene.objects if o.type=='ARMATURE')")
         a(f"bpy.ops.import_scene.fbx(filepath=r'{anim}', use_anim=True)")
-        a("arm = next((o for o in bpy.context.scene.objects if o.type=='ARMATURE'), None)")
+        a("_new_arms = [o for o in bpy.context.scene.objects if o.type=='ARMATURE' and o.name not in _prev_arms]")
+        a("arm = _new_arms[0] if _new_arms else None")
         a("if arm and arm.animation_data:")
         a("    action=arm.animation_data.action")
         a("    frame_count=int(action.frame_range[1]-action.frame_range[0])+1")
