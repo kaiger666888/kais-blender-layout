@@ -1,6 +1,6 @@
 ---
 name: kais-blender-layout
-version: 0.2.0
+version: 0.3.0
 description: "Blender 场景全流程引擎。AI 场景规划（自然语言→蓝图）+ 场景布局渲染（蓝图→图片）。角色+家具+HDRI+多机位，全自动化。触发词：blender-layout, 场景布局, 布景, layout, 3D 布景, 场景规划, scene planning, scene composition, 分镜转场景, 场景蓝图, 场景搭建"
 ---
 
@@ -201,6 +201,35 @@ script = living_room(animation="...", hdri="kloppenheim_06_4k")
 # 站姿场景
 script = standing_scene(animation="...", hdri="studio_small_03_4k")
 ```
+
+### Geometry Nodes 场景增强（v0.3.0 新增）
+
+通过 `geonodes` 参数程序化增强场景环境，无需手动摆放每个道具。
+
+```python
+script = render_scene(
+    characters=[{"animation": "..."}],
+    hdri="kloppenheim_06_4k",
+    geonodes={
+        "ground": {"size": 10, "density": 50, "seed": 42},
+        "scatter": [
+            {"target": "Floor", "collection_name": "Props", "density": 3000},
+        ],
+        "randomize": [
+            {"prefix": "sofa_02", "scale_range": (0.95, 1.05)},
+        ],
+    },
+)
+```
+
+**geonodes 配置项：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ground` | dict | `{size, density, seed}` — 程序化地面（碎石散布） |
+| `scatter` | list | `{target, collection_name/instance_object, density, seed, scale_min, scale_max, rotate_z, normal_influence}` — 面散布 |
+| `instances` | list | `{parent, objects, density, seed, scale_range}` — 多物体随机实例化 |
+| `randomize` | list | `{prefix, scale_range, rotation_range, position_offset, seed}` — 随机变换已有物体 |
 
 ### 角色放置（经过实战验证）
 
