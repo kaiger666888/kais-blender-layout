@@ -11,9 +11,23 @@ Linux → HTTP POST → Windows Blender 5.1 Cycles GPU。
         sofa_scale=1.34,
     )
     # POST /run/script with {"script": script, "timeout": 300}
+
+    # 场景模板构建（新增）
+    from blender_layout import build_scene, fetch_available_assets
+    assets = fetch_available_assets("http://192.168.71.38:8080")
+    script = build_scene("coffee_shop", assets=assets, characters=[...])
 """
 
+import json
+import os
+import sys
+import urllib.request
+import urllib.error
 from typing import Dict, List, Optional, Tuple
+
+# ── 模板目录 ──────────────────────────────────────────────────
+
+TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
 
 # ── 相机预设 ──────────────────────────────────────────────────
@@ -353,6 +367,411 @@ def render_scene(
         a(f"scene.render.filepath=r'{output_dir}\\\\scene_{shot}.png'")
         a("bpy.ops.render.render(write_still=True)")
         a(f"sys.stderr.write(f'[OK] {shot}\\\\n')")
+        a("")
+
+    a("print('DONE')")
+
+    return "\n".join(L)
+
+
+# ── 资产可用性检查 ────────────────────────────────────────────
+
+def fetch_available_assets(server_url: str = "http://192.168.71.38:8080") -> Dict[str, Dict]:
+    """从 Windows Blender Agent 获取可用资产列表。
+
+    Returns:
+        {asset_name: {"path": ..., "category": ...}}
+    """
+    url = server_url.rstrip("/") + "/scene-assets"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        result = {}
+        for asset in data.get("assets", []):
+            result[asset["name"]] = {
+                "path": asset["path"],
+                "category": asset["category"],
+            }
+        return result
+    except Exception as e:
+        sys.stderr.write("[blender-layout] Failed to fetch assets: " + str(e) + "\n")
+        return {}
+
+
+def _load_template(template_name: str) -> Dict:
+    """加载场景模板 JSON。"""
+    if not template_name.endswith(".json"):
+        template_name = template_name + ".json"
+    path = os.path.join(TEMPLATES_DIR, template_name)
+    if not os.path.exists(path):
+        raise FileNotFoundError("Template not found: " + path)
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_scene(
+    template_name: str = "coffee_shop",
+    characters: List[Dict] = None,
+    camera_shots: List[str] = None,
+    samples: int = 64,
+    resolution: Tuple[int, int] = (1280, 720),
+    assets: Dict[str, Dict] = None,
+    server_url: str = "http://192.168.71.38:8080",
+) -> str:
+    """基于场景模板构建完整 Blender 场景并渲染。
+
+    Args:
+        template_name: 模板名称（如 "coffee_shop"）
+        characters: 角色列表，同 render_scene()
+        camera_shots: 镜头列表，默认从模板读取
+        samples: 渲染采样数
+        resolution: (宽, 高)
+        assets: 可用资产字典（从 fetch_available_assets() 获取），None 则自动获取
+        server_url: Blender Agent 地址
+
+    Returns:
+        完整的 Blender Python 脚本字符串
+    """
+    # 加载模板
+    tpl = _load_template(template_name)
+
+    # 获取可用资产
+    if assets is None:
+        assets = fetch_available_assets(server_url)
+
+    camera_shots = camera_shots or tpl.get("camera_defaults", ["wide", "medium", "closeup"])
+    output_dir = DEFAULTS["output_dir"]
+    rx, ry = resolution
+    hdri = tpl.get("lighting", {}).get("hdri", "kloppenheim_06_4k")
+    hdri_path = DEFAULTS["hdri_dir"] + "\\\\" + hdri + ".hdr"
+
+    # 收集模板中需要的资产名称
+    all_assets = []
+    for item in tpl.get("furniture", []):
+        all_assets.append(item["asset"])
+    for item in tpl.get("decorations", []):
+        all_assets.append(item["asset"])
+
+    # 检查缺失
+    missing = []
+    for aname in all_assets:
+        if aname not in assets:
+            missing.append(aname)
+
+    L = []
+    a = L.append
+
+    # ═══ Header ═══
+    a("import bpy, sys, math, mathutils")
+    a("import os, glob as _glob")
+    a("sys.stderr.write('[build-scene] Template: " + tpl["name"] + " (" + tpl.get("display_name", "") + ")\\\\n')")
+    if missing:
+        a("sys.stderr.write('[build-scene] WARNING: Missing assets (using placeholders): " + ", ".join(missing) + "\\\\n')")
+    a("")
+
+    # ═══ Helpers ═══
+    a("def get_aabb(obj):")
+    a("    cs = [obj.matrix_world @ mathutils.Vector(c) for c in obj.bound_box]")
+    a("    xs=[c.x for c in cs]; ys=[c.y for c in cs]; zs=[c.z for c in cs]")
+    a("    return mathutils.Vector((min(xs),min(ys),min(zs))), mathutils.Vector((max(xs),max(ys),max(zs)))")
+    a("")
+    a("def scene_aabb(exclude={'Floor'}):")
+    a("    mn=mx=None")
+    a("    for o in bpy.context.scene.objects:")
+    a("        if o.type in ('MESH','ARMATURE') and o.name not in exclude:")
+    a("            a,b=get_aabb(o)")
+    a("            if mn is None: mn,mx=a,b")
+    a("            else:")
+    a("                mn=mathutils.Vector((min(mn.x,a.x),min(mn.y,a.y),min(mn.z,a.z)))")
+    a("                mx=mathutils.Vector((max(mx.x,b.x),max(mx.y,b.y),max(mx.z,b.z)))")
+    a("    return mn,mx")
+    a("")
+    a("def look_at(cam, target):")
+    a("    d=mathutils.Vector(target)-cam.location")
+    a("    cam.rotation_euler=d.to_track_quat('-Z','Y').to_euler()")
+    a("")
+
+    # ═══ 新建空场景 ═══
+    a("# ── New empty scene ──")
+    a("bpy.ops.wm.read_homefile(use_empty=True)")
+    a("bpy.context.scene.world = bpy.data.worlds.new('World')")
+    a("bpy.context.scene.world.use_nodes = True")
+    a("")
+
+    # ═══ 创建地板 ═══
+    a("# ── Floor ──")
+    a("bpy.ops.mesh.primitive_plane_add(size=1)")
+    a("floor = bpy.context.active_object")
+    a("floor.name = 'Floor'")
+    rw = tpl.get("room", {}).get("width", 6)
+    rd = tpl.get("room", {}).get("depth", 5)
+    a("floor.scale = (" + str(rw) + ", " + str(rd) + ", 1)")
+    a("floor.location = (0, 0, 0)")
+    a("")
+
+    # ═══ 创建墙壁 ═══
+    a("# ── Walls ──")
+    rh = tpl.get("room", {}).get("height", 3)
+    # Back wall
+    a("bpy.ops.mesh.primitive_plane_add(size=1)")
+    a("w1 = bpy.context.active_object")
+    a("w1.name = 'Wall_Back'")
+    a("w1.scale = (" + str(rw) + ", 1, " + str(rh) + ")")
+    a("w1.location = (0, " + str(rd) + ", " + str(rh / 2) + ")")
+    a("w1.rotation_euler = (0, 0, 0)")
+    # Left wall
+    a("bpy.ops.mesh.primitive_plane_add(size=1)")
+    a("w2 = bpy.context.active_object")
+    a("w2.name = 'Wall_Left'")
+    a("w2.scale = (1, " + str(rd) + ", " + str(rh) + ")")
+    a("w2.location = (-" + str(rw) + ", 0, " + str(rh / 2) + ")")
+    a("w2.rotation_euler = (0, 0, math.radians(90))")
+    # Right wall
+    a("bpy.ops.mesh.primitive_plane_add(size=1)")
+    a("w3 = bpy.context.active_object")
+    a("w3.name = 'Wall_Right'")
+    a("w3.scale = (1, " + str(rd) + ", " + str(rh) + ")")
+    a("w3.location = (" + str(rw) + ", 0, " + str(rh / 2) + ")")
+    a("w3.rotation_euler = (0, 0, math.radians(-90))")
+    a("bpy.context.view_layer.update()")
+    a("")
+
+    # ═══ 赋予材质颜色 ═══
+    a("# ── Materials ──")
+    # Floor material
+    a("mat_floor = bpy.data.materials.new('Mat_Floor')")
+    a("mat_floor.use_nodes = True")
+    a("mat_floor.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (0.35, 0.25, 0.15, 1.0)")
+    a("mat_floor.node_tree.nodes['Principled BSDF'].inputs['Roughness'].default_value = 0.8")
+    a("floor.data.materials.append(mat_floor)")
+    # Wall material
+    a("mat_wall = bpy.data.materials.new('Mat_Wall')")
+    a("mat_wall.use_nodes = True")
+    a("mat_wall.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (0.9, 0.88, 0.82, 1.0)")
+    a("mat_wall.node_tree.nodes['Principled BSDF'].inputs['Roughness'].default_value = 0.9")
+    a("for w in [w1, w2, w3]:")
+    a("    w.data.materials.append(mat_wall)")
+    a("")
+
+    # ═══ 导入家具 ═══
+    a("# ── Import Furniture ──")
+    for item in tpl.get("furniture", []):
+        aname = item["asset"]
+        pos = item.get("position", [0, 0, 0])
+        rot = item.get("rotation", 0)
+        scl = item.get("scale", 1.0)
+        a("# Furniture: " + aname)
+        a("_aname = '" + aname + "'")
+        if aname in assets:
+            apath = assets[aname]["path"]
+            a("_apath = r'" + apath + "'")
+            a("_blend = _glob.glob(os.path.join(_apath, '*.blend'))")
+            a("_glb = _glob.glob(os.path.join(_apath, '*.glb'))")
+            a("_prev = set(o.name for o in bpy.context.scene.objects)")
+            a("if _blend:")
+            a("    try:")
+            a("        with bpy.data.libraries.load(_blend[0], link=False) as (df, dt):")
+            a("            dt.objects = [n for n in df.objects if n is not None]")
+            a("        for obj in dt.objects:")
+            a("            if obj is not None:")
+            a("                bpy.context.scene.collection.objects.link(obj)")
+            a("    except Exception as e:")
+            a("        sys.stderr.write('[layout] blend import failed: ' + str(e) + '\\\\n')")
+            a("elif _glb:")
+            a("    bpy.ops.import_scene.gltf(filepath=_glb[0])")
+            a("_new = [o for o in bpy.context.scene.objects if o.name not in _prev]")
+            a("if _new:")
+            a("    _new[0].location = mathutils.Vector(" + str(pos) + ")")
+            a("    _new[0].rotation_euler = (0, 0, math.radians(" + str(rot) + "))")
+            if scl != 1.0:
+                a("    _new[0].scale = (" + str(scl) + ", " + str(scl) + ", " + str(scl) + ")")
+            a("    bpy.context.view_layer.update()")
+            a("    sys.stderr.write('[layout] Imported " + aname + " (' + str(len(_new)) + ' objs)\\\\n')")
+        else:
+            # Placeholder geometry
+            a("sys.stderr.write('[layout] WARNING: " + aname + " not available, using placeholder\\\\n')")
+            a("bpy.ops.mesh.primitive_cube_add(size=0.5)")
+            a("_ph = bpy.context.active_object")
+            a("_ph.name = 'Placeholder_" + aname + "'")
+            a("_ph.location = mathutils.Vector(" + str(pos) + ")")
+            a("_ph.rotation_euler = (0, 0, math.radians(" + str(rot) + "))")
+            a("_ph.scale = (" + str(scl) + ", " + str(scl) + ", " + str(scl) + ")")
+            a("mat_ph = bpy.data.materials.new('Mat_PH_" + aname + "')")
+            a("mat_ph.use_nodes = True")
+            a("mat_ph.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (0.6, 0.5, 0.4, 1.0)")
+            a("_ph.data.materials.append(mat_ph)")
+            a("bpy.context.view_layer.update()")
+        a("")
+    a("bpy.ops.object.select_all(action='DESELECT')")
+    a("")
+
+    # ═══ 导入装饰 ═══
+    a("# ── Import Decorations ──")
+    for item in tpl.get("decorations", []):
+        aname = item["asset"]
+        pos = item.get("position", [0, 0, 0])
+        rot = item.get("rotation", 0)
+        scl = item.get("scale", 1.0)
+        a("# Decoration: " + aname)
+        a("_aname = '" + aname + "'")
+        if aname in assets:
+            apath = assets[aname]["path"]
+            a("_apath = r'" + apath + "'")
+            a("_blend = _glob.glob(os.path.join(_apath, '*.blend'))")
+            a("_glb = _glob.glob(os.path.join(_apath, '*.glb'))")
+            a("_prev = set(o.name for o in bpy.context.scene.objects)")
+            a("if _blend:")
+            a("    try:")
+            a("        with bpy.data.libraries.load(_blend[0], link=False) as (df, dt):")
+            a("            dt.objects = [n for n in df.objects if n is not None]")
+            a("        for obj in dt.objects:")
+            a("            if obj is not None:")
+            a("                bpy.context.scene.collection.objects.link(obj)")
+            a("    except Exception as e:")
+            a("        sys.stderr.write('[layout] blend import failed: ' + str(e) + '\\\\n')")
+            a("elif _glb:")
+            a("    bpy.ops.import_scene.gltf(filepath=_glb[0])")
+            a("_new = [o for o in bpy.context.scene.objects if o.name not in _prev]")
+            a("if _new:")
+            a("    _new[0].location = mathutils.Vector(" + str(pos) + ")")
+            a("    _new[0].rotation_euler = (0, 0, math.radians(" + str(rot) + "))")
+            if scl != 1.0:
+                a("    _new[0].scale = (" + str(scl) + ", " + str(scl) + ", " + str(scl) + ")")
+            a("    bpy.context.view_layer.update()")
+            a("    sys.stderr.write('[layout] Imported " + aname + " (' + str(len(_new)) + ' objs)\\\\n')")
+        else:
+            a("sys.stderr.write('[layout] WARNING: " + aname + " not available, using placeholder\\\\n')")
+            a("bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=0.4)")
+            a("_ph = bpy.context.active_object")
+            a("_ph.name = 'Placeholder_" + aname + "'")
+            a("_ph.location = mathutils.Vector(" + str(pos) + ")")
+            a("_ph.rotation_euler = (0, 0, math.radians(" + str(rot) + "))")
+            a("_ph.scale = (" + str(scl) + ", " + str(scl) + ", " + str(scl) + ")")
+            a("mat_ph = bpy.data.materials.new('Mat_PH_" + aname + "')")
+            a("mat_ph.use_nodes = True")
+            a("mat_ph.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (0.3, 0.5, 0.3, 1.0)")
+            a("_ph.data.materials.append(mat_ph)")
+            a("bpy.context.view_layer.update()")
+        a("")
+    a("bpy.ops.object.select_all(action='DESELECT')")
+    a("")
+
+    # ═══ 灯光 ═══
+    a("# ── Lighting ──")
+    scheme = tpl.get("lighting", {}).get("scheme", "warm")
+    if scheme == "warm":
+        light_color = "(1.0, 0.85, 0.7)"
+        light_strength = "500"
+    elif scheme == "neutral":
+        light_color = "(1.0, 0.95, 0.9)"
+        light_strength = "600"
+    else:
+        light_color = "(0.9, 0.95, 1.0)"
+        light_strength = "500"
+    # Key light
+    a("light_data = bpy.data.lights.new('Key_Light', 'AREA')")
+    a("light_data.energy = " + light_strength)
+    a("light_data.color = " + light_color)
+    a("light_data.size = 2.0")
+    a("light_obj = bpy.data.objects.new('Key_Light', light_data)")
+    a("bpy.context.scene.collection.objects.link(light_obj)")
+    a("light_obj.location = (0, 0, " + str(rh - 0.3) + ")")
+    a("light_obj.rotation_euler = (math.radians(90), 0, 0)")
+    # Fill light
+    a("fill_data = bpy.data.lights.new('Fill_Light', 'AREA')")
+    a("fill_data.energy = " + str(int(int(light_strength) * 0.4)) + "")
+    a("fill_data.color = " + light_color)
+    a("fill_data.size = 3.0")
+    a("fill_obj = bpy.data.objects.new('Fill_Light', fill_data)")
+    a("bpy.context.scene.collection.objects.link(fill_obj)")
+    a("fill_obj.location = (-2, -2, " + str(rh - 0.5) + ")")
+    a("fill_obj.rotation_euler = (math.radians(60), 0, math.radians(45))")
+    a("")
+
+    # ═══ HDRI ═══
+    a("# ── HDRI ──")
+    a("world = bpy.context.scene.world")
+    a("bg = world.node_tree.nodes.get('Background')")
+    a("if bg:")
+    a("    env = world.node_tree.nodes.new(type='ShaderNodeTexEnvironment')")
+    a("    env.image = bpy.data.images.load(r'" + hdri_path + "')")
+    a("    world.node_tree.links.new(env.outputs[0], bg.inputs[0])")
+    a("    bg.inputs[1].default_value = 0.5")
+    a("")
+
+    # ═══ 角色 ═══
+    characters = characters or []
+    if characters:
+        a("# ── Characters ──")
+        for ci, ch in enumerate(characters):
+            anim = ch.get("animation", "")
+            target = ch.get("position", "").replace("on:", "").strip()
+            clr = ch.get("clearance", DEFAULTS["default_clearance"])
+            a("# Character " + str(ci + 1))
+            a("_prev_arms = set(o.name for o in bpy.context.scene.objects if o.type=='ARMATURE')")
+            a("bpy.ops.import_scene.fbx(filepath=r'" + anim + "', use_anim=True)")
+            a("_new_arms = [o for o in bpy.context.scene.objects if o.type=='ARMATURE' and o.name not in _prev_arms]")
+            a("arm = _new_arms[0] if _new_arms else None")
+            a("if arm and arm.animation_data:")
+            a("    action = arm.animation_data.action")
+            a("    frame_count = int(action.frame_range[1] - action.frame_range[0]) + 1")
+            a("    if frame_count < 2: frame_count = 2")
+            a("    rf = frame_count // 4")
+            a("    bpy.context.scene.frame_set(rf)")
+            a("    sys.stderr.write('[build-scene] Char" + str(ci + 1) + ": frame ' + str(rf) + '/' + str(frame_count) + '\\\\n')")
+            a("    bpy.context.view_layer.update()")
+            a("")
+            a("for m in bpy.context.scene.objects:")
+            a("    if m.type=='MESH' and m.name=='Beta_Joints':")
+            a("        m.hide_render=True; m.hide_viewport=True")
+            a("")
+            if target:
+                a("# Place on " + target)
+                a("furn = None")
+                a("for obj in bpy.context.scene.objects:")
+                a("    if obj.type=='MESH' and '" + target.lower() + "' in obj.name.lower():")
+                a("        furn = obj; break")
+                a("if furn and arm:")
+                a("    f_mn, f_mx = get_aabb(furn)")
+                a("    top = f_mx.z")
+                a("    c_mn, c_mx = get_aabb(arm)")
+                a("    dz = top + " + str(clr) + " - c_mn.z")
+                a("    cy = (f_mn.y + f_mx.y) / 2; ccy = (c_mn.y + c_mx.y) / 2")
+                a("    arm.location.z += dz")
+                a("    arm.location.y += (cy - ccy)")
+                a("    bpy.context.view_layer.update()")
+                a("    sys.stderr.write('[build-scene] Placed on " + target + "\\\\n')")
+                a("")
+    a("bpy.ops.object.select_all(action='DESELECT')")
+    a("")
+
+    # ═══ Camera + Render ═══
+    a("# ── Camera + Render ──")
+    a("cam = next((o for o in bpy.context.scene.objects if o.type=='CAMERA'), None)")
+    a("if not cam:")
+    a("    cam = bpy.data.objects.new('Camera', bpy.data.cameras.new('Camera'))")
+    a("    bpy.context.scene.collection.objects.link(cam)")
+    a("bpy.context.scene.camera = cam")
+    a("mn, mx = scene_aabb()")
+    a("ctr = (mn + mx) / 2")
+    a("")
+    a("scene = bpy.context.scene")
+    a("scene.render.engine = 'CYCLES'")
+    a("scene.cycles.device = 'GPU'")
+    a("scene.render.resolution_x = " + str(rx) + "")
+    a("scene.render.resolution_y = " + str(ry) + "")
+    a("scene.cycles.samples = " + str(samples) + "")
+    a("")
+
+    for shot in camera_shots:
+        params = CAMERA_PRESETS.get(shot, CAMERA_PRESETS["medium"])
+        ox, oy, oz = params
+        a("cam.location = ctr + mathutils.Vector((" + str(ox) + ", " + str(oy) + ", " + str(oz) + "))")
+        a("look_at(cam, ctr)")
+        a("scene.render.filepath = r'" + output_dir + "\\\\scene_" + shot + ".png'")
+        a("bpy.ops.render.render(write_still=True)")
+        a("sys.stderr.write('[OK] " + shot + "\\\\n')")
         a("")
 
     a("print('DONE')")

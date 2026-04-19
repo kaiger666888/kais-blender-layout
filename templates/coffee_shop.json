@@ -1,0 +1,26 @@
+{
+  "name": "coffee_shop",
+  "display_name": "咖啡厅",
+  "description": "温馨的咖啡厅内景，木地板+暖光+沙发+书架+绿植",
+  "room": {"width": 6, "depth": 5, "height": 3},
+  "environment": {
+    "floor": "wood_planks_dirt",
+    "walls": "beige_wall_001",
+    "ceiling": "white_plaster_02"
+  },
+  "furniture": [
+    {"type": "sofa", "asset": "sofa_02", "position": [0, -1.2, 0], "rotation": 0, "scale": 1.34},
+    {"type": "bookshelf", "asset": "decorative_book_set_01", "position": [2.5, -0.5, 0.4], "rotation": 0, "scale": 1.0},
+    {"type": "tv", "asset": "Television_01", "position": [-2.5, 0, 0.8], "rotation": 90, "scale": 1.0},
+    {"type": "lantern", "asset": "Lantern_01", "position": [1.8, 0.5, 0.75], "scale": 1.0},
+    {"type": "camera", "asset": "Camera_01", "position": [-2.0, -2.0, 0.7], "rotation": -45, "scale": 0.8}
+  ],
+  "decorations": [
+    {"type": "plant", "asset": "potted_plant_01", "position": [-2.5, -2.0, 0], "scale": 0.8},
+    {"type": "plant2", "asset": "potted_plant_02", "position": [2.5, 1.5, 0], "scale": 0.7},
+    {"type": "fern", "asset": "fern_02", "position": [2.0, -2.0, 0], "scale": 0.6},
+    {"type": "bust", "asset": "marble_bust_01", "position": [2.5, -2.0, 0.5], "scale": 0.8}
+  ],
+  "lighting": {"scheme": "warm", "hdri": "kloppenheim_06_4k"},
+  "camera_defaults": ["wide", "medium", "closeup"]
+}
