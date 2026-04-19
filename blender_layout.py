@@ -65,6 +65,7 @@ def render_scene(
     base_scene: str = None,
     render_frame: int = None,
     props: List[Dict] = None,
+    geonodes: Dict = None,
 ) -> str:
     """
     生成完整的 Blender 场景布局脚本。
@@ -88,6 +89,11 @@ def render_scene(
             - position: [x, y, z] 世界坐标（必填）
             - scale: 缩放倍数，默认 1.0（可选）
             - name: 对象名称，用于去重（可选）
+        geonodes: Geometry Nodes 场景增强配置，包含:
+            - scatter: [{target, collection_name, density, seed, scale_min, scale_max}] — 面散布
+            - instances: [{parent, objects, density, seed, scale_range}] — 多物体实例化
+            - randomize: [{prefix, scale_range, rotation_range, position_offset}] — 随机变换
+            - ground: bool — 程序化地面细节
 
     Returns:
         完整的 Blender Python 脚本字符串
@@ -595,7 +601,10 @@ def build_scene(
     a("")
     for item in tpl.get("furniture", []):
         aname = item["asset"]
-        pos = item.get("position", [0, 0, 0])
+        if aname in solved_positions:
+            pos = solved_positions[aname]
+        else:
+            pos = item.get("position", [0, 0, 0])
         rot = item.get("rotation", 0)
         scl = item.get("scale", 1.0)
         meta = metadata.get(aname, {})
@@ -656,7 +665,10 @@ def build_scene(
     a("# ── Import Decorations ──")
     for item in tpl.get("decorations", []):
         aname = item["asset"]
-        pos = item.get("position", [0, 0, 0])
+        if aname in solved_positions:
+            pos = solved_positions[aname]
+        else:
+            pos = item.get("position", [0, 0, 0])
         rot = item.get("rotation", 0)
         scl = item.get("scale", 1.0)
         meta = metadata.get(aname, {})
@@ -854,6 +866,62 @@ def living_room(
         characters=[{"animation": animation, "position": position}],
         hdri=hdri,
         sofa_scale=sofa_scale,
+    )
+
+
+def render_from_description(
+    description: str,
+    server_url: str = "http://192.168.71.38:8080",
+    animation_base: str = r"D:\BlenderAgent\animations\motions",
+    **kwargs,
+) -> str:
+    """一句话生成场景渲染脚本。
+
+    render_from_description("两个朋友在咖啡厅聊天")
+    → 自动选择模板、配置角色、设置灯光、生成 Blender 脚本
+
+    Args:
+        description: 自然语言场景描述
+        server_url: Blender Agent 地址
+        animation_base: 动画文件基础路径
+        **kwargs: 传递给 render_scene() 的额外参数
+
+    Returns:
+        完整的 Blender Python 脚本字符串
+    """
+    from scene_parser import (
+        parse_scene_request,
+        match_animation,
+        fetch_available_animations,
+    )
+
+    # 解析自然语言
+    params = parse_scene_request(description)
+
+    # 获取可用动画列表用于智能匹配
+    available_anims = fetch_available_animations(server_url)
+
+    # 将 animation_hint 解析为实际动画路径
+    characters = []
+    for ch in params.get("characters", []):
+        hint = ch.get("animation_hint", "idle")
+        anim_name = match_animation(hint, available_anims)
+        anim_path = os.path.join(animation_base, anim_name) if anim_name else ""
+        characters.append({
+            "animation": anim_path,
+            "position": ch.get("position", ""),
+        })
+
+    # 从解析结果构建脚本
+    lighting = params.get("lighting", {})
+    hdri = lighting.get("hdri", "kloppenheim_06_4k")
+    camera_shots = params.get("camera_shots", ["wide", "medium", "closeup"])
+
+    return render_scene(
+        characters=characters,
+        hdri=hdri,
+        camera_shots=camera_shots,
+        **kwargs,
     )
 
 
