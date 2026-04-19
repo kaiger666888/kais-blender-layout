@@ -50,6 +50,7 @@ def render_scene(
     resolution: Tuple[int, int] = None,
     base_scene: str = None,
     render_frame: int = None,
+    props: List[Dict] = None,
 ) -> str:
     """
     生成完整的 Blender 场景布局脚本。
@@ -67,8 +68,12 @@ def render_scene(
         samples: 渲染采样数
         resolution: (宽, 高)
         base_scene: 基础场景文件路径
-
         render_frame: 指定渲染帧（None=自动取动画1/4处，-1=第一帧）
+        props: 场景道具列表，每个包含:
+            - asset_path: GLB 文件路径（必填）
+            - position: [x, y, z] 世界坐标（必填）
+            - scale: 缩放倍数，默认 1.0（可选）
+            - name: 对象名称，用于去重（可选）
 
     Returns:
         完整的 Blender Python 脚本字符串
@@ -91,6 +96,9 @@ def render_scene(
             "clearance": ch.get("clearance", DEFAULTS["default_clearance"]),
             "scale": ch.get("scale", sofa_scale),
         })
+
+    # 构建 props blocks
+    props = props or []
 
     L = []  # script lines
     a = L.append
@@ -144,6 +152,55 @@ def render_scene(
     a("        bpy.context.view_layer.update()")
     a(f"        sys.stderr.write(f'  Assembled seat onto base\\\\n')")
     a("")
+
+    # ═══ Props (scene decorations) ═══
+    if props:
+        a("# ── Import scene props ──")
+        for pi, prop in enumerate(props):
+            ppath = prop.get("asset_path", "")
+            pname = prop.get("name", "")
+            ppos = prop.get("position", [0, 0, 0])
+            pscl = prop.get("scale", 1.0)
+            check_name = pname if pname else ppath.split("\\")[-1]
+            a("import os, glob as _glob")
+            a(f"_pdir = r'{ppath}'")
+            a(f"_pname = '{check_name}'")
+            a("_exists = any(_pname in o.name for o in bpy.context.scene.objects)")
+            a("if not _exists:")
+            # Try blend first, then glb
+            a("    _blend = _glob.glob(os.path.join(_pdir, '*.blend'))")
+            a("    _glb = _glob.glob(os.path.join(_pdir, '*.glb'))")
+            a("    _imported = []")
+            a("    if _blend:")
+            # Append from blend: link=False to make editable
+            a("        _prev = set(o.name for o in bpy.context.scene.objects)")
+            a("        try:")
+            a("            with bpy.data.libraries.load(_blend[0], link=False) as (data_from, data_to):")
+            a("                data_to.objects = [n for n in data_from.objects if n is not None]")
+            a("            for obj in data_to.objects:")
+            a("                if obj is not None:")
+            a("                    bpy.context.scene.collection.objects.link(obj)")
+            a("        except Exception as e:")
+            a("            sys.stderr.write('[layout] blend append failed: ' + str(e) + '\\\\n')")
+            a("        _imported = [o for o in bpy.context.scene.objects if o.name not in _prev]")
+            a("    elif _glb:")
+            a("        bpy.ops.import_scene.gltf(filepath=_glb[0])")
+            a("        _imported = [o for o in bpy.context.scene.objects if o.select_get()]")
+            a("        if not _imported:")
+            a("            _imported = bpy.context.selected_objects")
+            a("    if _imported:")
+            a("        bpy.context.view_layer.update()")
+            a("        _imported[0].location = mathutils.Vector(" + str(ppos) + ")")
+            a("        if " + str(pscl) + " != 1.0:")
+            a("            _imported[0].scale = (" + str(pscl) + ", " + str(pscl) + ", " + str(pscl) + ")")
+            a("        bpy.context.view_layer.update()")
+            a("    sys.stderr.write('[layout] Prop ' + _pname + ' imported (' + str(len(_imported)) + ' objs)\\\\n')")
+            a("else:")
+            a("    sys.stderr.write('[layout] Prop " + check_name + " already exists\\\\n')")
+            a("")
+        a("bpy.ops.object.select_all(action='DESELECT')")
+        a("bpy.context.view_layer.update()")
+        a("")
 
     # ═══ Clean old characters (once before loop) ═══
     a("# ── Clean old characters before importing new ones ──")
@@ -204,7 +261,7 @@ def render_scene(
 
         # Place character
         if target:
-            a(f"# Place character on {target}")
+            a(f"# Place character on {target} (vertex-based collision)")
             a("furn=None")
             a(f"for obj in bpy.context.scene.objects:")
             a(f"    if obj.type=='MESH' and '{target.lower()}' in obj.name.lower():")
@@ -212,21 +269,21 @@ def render_scene(
             a("if furn:")
             a("    f_mn,f_mx=get_aabb(furn)")
             a("    top=f_mx.z")
-            a("    # Try Hips bone for accurate sitting position")
-            a("    hips_z=None")
-            a("    if arm and arm.pose:")
-            a("        for pb in arm.pose.bones:")
-            a("            if 'Hips' in pb.name:")
-            a("                hips_z=(arm.matrix_world @ pb.head).z")
-            a("                break")
-            a("    if hips_z is not None:")
-            a("        sit=hips_z")
-            a("    else:")
-            a("        sit=c_mn.z+ch*0.40")
-            a("        sys.stderr.write('  WARNING: No Hips bone found, using fallback 0.40\\\\n')")
-            a(f"    dz=top+{clr}-sit")
+            a("    # Find actual lowest Z from all child mesh vertices")
+            a("    low_z=None")
+            a("    if arm:")
+            a("        for child in arm.children:")
+            a("            if child.type=='MESH' and child.data:")
+            a("                for v in child.data.vertices:")
+            a("                    wz=(child.matrix_world @ v.co).z")
+            a("                    if low_z is None or wz<low_z:")
+            a("                        low_z=wz")
+            a("    if low_z is None:")
+            a("        low_z=c_mn.z")
+            a("        sys.stderr.write('  WARNING: No child mesh verts, using AABB min\\\\n')")
+            a(f"    dz=top+{clr}-low_z")
+            a(f"    sys.stderr.write(f'  Place: {{furn.name}} top={{top:.3f}} low_z={{low_z:.3f}} dz={{dz:.3f}}\\\\n')")
             a("    cy=(f_mn.y+f_mx.y)/2; ccy=(c_mn.y+c_mx.y)/2; dy=cy-ccy")
-            a(f"    sys.stderr.write(f'  Place on {{furn.name}}: dz={{dz:.3f}} dy={{dy:.3f}} hips={{hips_z}}\\\\n')")
             a("    arm.location.z+=dz; arm.location.y+=dy")
             a("    bpy.context.view_layer.update()")
             a("")
