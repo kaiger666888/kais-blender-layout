@@ -211,6 +211,16 @@ def render_scene(
     a("")
 
     # ═══ Characters ═══
+    # Pre-count characters per furniture for Y offset
+    a("_furn_chars = {}")
+    a("_furn_idx = {}")
+    for ci, cb in enumerate(char_blocks):
+        target = cb["target"]
+        if target:
+            a(f"_furn_chars.setdefault('{target}',0)")
+            a(f"_furn_chars['{target}']+=1")
+    a("")
+
     for ci, cb in enumerate(char_blocks):
         anim = cb["anim"]
         target = cb["target"]
@@ -269,22 +279,33 @@ def render_scene(
             a("if furn:")
             a("    f_mn,f_mx=get_aabb(furn)")
             a("    top=f_mx.z")
-            a("    # Find actual lowest Z from all child mesh vertices")
+            a("    # Find lowest Z from pose bones (reliable for rigged meshes)")
             a("    low_z=None")
-            a("    if arm:")
-            a("        for child in arm.children:")
-            a("            if child.type=='MESH' and child.data:")
-            a("                for v in child.data.vertices:")
-            a("                    wz=(child.matrix_world @ v.co).z")
-            a("                    if low_z is None or wz<low_z:")
-            a("                        low_z=wz")
-            a("    if low_z is None:")
+            a("    _foot_names=['RightFoot','LeftFoot','RightToeBase','LeftToeBase','RightFoot_IK','LeftFoot_IK']")
+            a("    if arm and arm.pose:")
+            a("        for pb in arm.pose.bones:")
+            a("            if any(fn.lower() in pb.name.lower() for fn in _foot_names):")
+            a("                wz=(arm.matrix_world @ pb.head).z")
+            a("                if low_z is None or wz<low_z:")
+            a("                    low_z=wz")
+            a("    if low_z is None and arm:")
             a("        low_z=c_mn.z")
-            a("        sys.stderr.write('  WARNING: No child mesh verts, using AABB min\\\\n')")
+            a("        sys.stderr.write('  WARNING: No foot bones found, using AABB min\\\\n')")
             a(f"    dz=top+{clr}-low_z")
             a(f"    sys.stderr.write(f'  Place: {{furn.name}} top={{top:.3f}} low_z={{low_z:.3f}} dz={{dz:.3f}}\\\\n')")
             a("    cy=(f_mn.y+f_mx.y)/2; ccy=(c_mn.y+c_mx.y)/2; dy=cy-ccy")
-            a("    arm.location.z+=dz; arm.location.y+=dy")
+            a("    # Offset Y if multiple chars on same furniture")
+            a(f"    _tkey='{target}'")
+            a("    _total=_furn_chars.get(_tkey,1)")
+            a("    _furn_idx.setdefault(_tkey,0)")
+            a("    _iidx=_furn_idx[_tkey]; _furn_idx[_tkey]+=1")
+            a("    if _total>1:")
+            a("        _spacing=0.7")
+            a("        _yoff=(_iidx-(_total-1)/2.0)*_spacing")
+            a("    else:")
+            a("        _yoff=0.0")
+            a("    arm.location.z+=dz; arm.location.y+=dy+_yoff")
+            a(f"    sys.stderr.write(f'  Y-offset: {{_yoff:.2f}} ({{_iidx}}/{{_total}} on {{_tkey}})\\\\n')")
             a("    bpy.context.view_layer.update()")
             a("")
 
