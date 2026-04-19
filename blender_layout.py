@@ -49,6 +49,7 @@ def render_scene(
     samples: int = None,
     resolution: Tuple[int, int] = None,
     base_scene: str = None,
+    render_frame: int = None,
 ) -> str:
     """
     生成完整的 Blender 场景布局脚本。
@@ -66,6 +67,8 @@ def render_scene(
         samples: 渲染采样数
         resolution: (宽, 高)
         base_scene: 基础场景文件路径
+
+        render_frame: 指定渲染帧（None=自动取动画1/4处，-1=第一帧）
 
     Returns:
         完整的 Blender Python 脚本字符串
@@ -142,6 +145,14 @@ def render_scene(
     a(f"        sys.stderr.write(f'  Assembled seat onto base\\\\n')")
     a("")
 
+    # ═══ Clean old characters (once before loop) ═══
+    a("# ── Clean old characters before importing new ones ──")
+    a("for obj in list(bpy.context.scene.objects):")
+    a("    if obj.type=='ARMATURE' or obj.name=='Human':")
+    a("        bpy.data.objects.remove(obj, do_unlink=True)")
+    a("bpy.context.view_layer.update()")
+    a("")
+
     # ═══ Characters ═══
     for ci, cb in enumerate(char_blocks):
         anim = cb["anim"]
@@ -151,17 +162,16 @@ def render_scene(
 
         a(f"# ── Character {ci+1} ──")
 
-        # Clean old characters
-        a("for obj in list(bpy.context.scene.objects):")
-        a("    if obj.type=='ARMATURE' or obj.name=='Human':")
-        a("        bpy.data.objects.remove(obj, do_unlink=True)")
-        a("")
-
         # Import animation FBX
         a(f"bpy.ops.import_scene.fbx(filepath=r'{anim}', use_anim=True)")
         a("arm = next((o for o in bpy.context.scene.objects if o.type=='ARMATURE'), None)")
         a("if arm and arm.animation_data:")
-        a("    bpy.context.scene.frame_set(1)")
+        a("    action=arm.animation_data.action")
+        a("    frame_count=int(action.frame_range[1]-action.frame_range[0])+1")
+        a("    if frame_count<2: frame_count=2")
+        a(f"    rf = {render_frame} if {render_frame} is not None else (1 if {render_frame}==-1 else frame_count//4)")
+        a("    bpy.context.scene.frame_set(rf)")
+        a(f"    sys.stderr.write(f'  Char{ci+1}: frame {{rf}}/{{frame_count}}\\\\n')")
         a("    bpy.context.view_layer.update()")
         a("")
 
@@ -202,10 +212,21 @@ def render_scene(
             a("if furn:")
             a("    f_mn,f_mx=get_aabb(furn)")
             a("    top=f_mx.z")
-            a("    sit=c_mn.z+ch*0.40")
+            a("    # Try Hips bone for accurate sitting position")
+            a("    hips_z=None")
+            a("    if arm and arm.pose:")
+            a("        for pb in arm.pose.bones:")
+            a("            if 'Hips' in pb.name:")
+            a("                hips_z=(arm.matrix_world @ pb.head).z")
+            a("                break")
+            a("    if hips_z is not None:")
+            a("        sit=hips_z")
+            a("    else:")
+            a("        sit=c_mn.z+ch*0.40")
+            a("        sys.stderr.write('  WARNING: No Hips bone found, using fallback 0.40\\\\n')")
             a(f"    dz=top+{clr}-sit")
             a("    cy=(f_mn.y+f_mx.y)/2; ccy=(c_mn.y+c_mx.y)/2; dy=cy-ccy")
-            a(f"    sys.stderr.write(f'  Place on {{furn.name}}: dz={{dz:.3f}} dy={{dy:.3f}}\\\\n')")
+            a(f"    sys.stderr.write(f'  Place on {{furn.name}}: dz={{dz:.3f}} dy={{dy:.3f}} hips={{hips_z}}\\\\n')")
             a("    arm.location.z+=dz; arm.location.y+=dy")
             a("    bpy.context.view_layer.update()")
             a("")
