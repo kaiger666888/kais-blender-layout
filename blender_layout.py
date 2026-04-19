@@ -410,6 +410,16 @@ def _load_template(template_name: str) -> Dict:
         return json.load(f)
 
 
+def _load_asset_metadata(metadata_path: str = None) -> Dict:
+    """加载资产元数据。"""
+    if metadata_path is None:
+        metadata_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "asset_metadata.json")
+    if not os.path.exists(metadata_path):
+        return {}
+    with open(metadata_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def build_scene(
     template_name: str = "coffee_shop",
     characters: List[Dict] = None,
@@ -418,6 +428,7 @@ def build_scene(
     resolution: Tuple[int, int] = (1280, 720),
     assets: Dict[str, Dict] = None,
     server_url: str = "http://192.168.71.38:8080",
+    use_layout_solver: bool = True,
 ) -> str:
     """基于场景模板构建完整 Blender 场景并渲染。
 
@@ -440,11 +451,29 @@ def build_scene(
     if assets is None:
         assets = fetch_available_assets(server_url)
 
+    # 加载资产元数据
+    metadata = _load_asset_metadata()
+
     camera_shots = camera_shots or tpl.get("camera_defaults", ["wide", "medium", "closeup"])
     output_dir = DEFAULTS["output_dir"]
     rx, ry = resolution
     hdri = tpl.get("lighting", {}).get("hdri", "kloppenheim_06_4k")
     hdri_path = DEFAULTS["hdri_dir"] + "\\\\" + hdri + ".hdr"
+
+    # ── 布局求解器：将空间关系转换为坐标 ──
+    from layout_solver import LayoutSolver
+
+    rw = tpl.get("room", {}).get("width", 6)
+    rd = tpl.get("room", {}).get("depth", 5)
+    rh = tpl.get("room", {}).get("height", 3)
+
+    solved_positions = {}
+    if use_layout_solver:
+        solver = LayoutSolver(rw, rd, rh)
+        all_items = tpl.get("furniture", []) + tpl.get("decorations", [])
+        solved = solver.solve_all(all_items)
+        for item_name, info in solved.items():
+            solved_positions[item_name] = info["position"]
 
     # 收集模板中需要的资产名称
     all_assets = []
@@ -554,13 +583,22 @@ def build_scene(
     a("    w.data.materials.append(mat_wall)")
     a("")
 
-    # ═══ 导入家具 ═══
+    # ═══ 导入家具（含 AABB 碰撞检测） ═══
     a("# ── Import Furniture ──")
+    a("_placed_aabbs = []")
+    a("def _aabb_overlaps(pos, size, placed, margin=0.1):")
+    a("    for p_pos, p_size in placed:")
+    a("        if (abs(pos[0]-p_pos[0]) < (size[0]+p_size[0])/2+margin and")
+    a("            abs(pos[1]-p_pos[1]) < (size[1]+p_size[1])/2+margin):")
+    a("            return True")
+    a("    return False")
+    a("")
     for item in tpl.get("furniture", []):
         aname = item["asset"]
         pos = item.get("position", [0, 0, 0])
         rot = item.get("rotation", 0)
         scl = item.get("scale", 1.0)
+        meta = metadata.get(aname, {})
         a("# Furniture: " + aname)
         a("_aname = '" + aname + "'")
         if aname in assets:
@@ -588,33 +626,53 @@ def build_scene(
                 a("    _new[0].scale = (" + str(scl) + ", " + str(scl) + ", " + str(scl) + ")")
             a("    bpy.context.view_layer.update()")
             a("    sys.stderr.write('[layout] Imported " + aname + " (' + str(len(_new)) + ' objs)\\\\n')")
+            # Track AABB using metadata size
+            if meta.get("size"):
+                msize = meta["size"]
+                a("    _placed_aabbs.append((" + str(pos) + ", [" + str(msize[0] * scl) + ", " + str(msize[1] * scl) + "])")
+                a(")")
         else:
-            # Placeholder geometry
+            # Placeholder with metadata-based size
+            ph_size = meta.get("size", [0.5, 0.5, 0.5])
             a("sys.stderr.write('[layout] WARNING: " + aname + " not available, using placeholder\\\\n')")
-            a("bpy.ops.mesh.primitive_cube_add(size=0.5)")
+            a("bpy.ops.mesh.primitive_cube_add(size=1)")
             a("_ph = bpy.context.active_object")
             a("_ph.name = 'Placeholder_" + aname + "'")
             a("_ph.location = mathutils.Vector(" + str(pos) + ")")
             a("_ph.rotation_euler = (0, 0, math.radians(" + str(rot) + "))")
-            a("_ph.scale = (" + str(scl) + ", " + str(scl) + ", " + str(scl) + ")")
+            a("_ph.scale = (" + str(ph_size[0] * scl) + ", " + str(ph_size[1] * scl) + ", " + str(ph_size[2] * scl) + ")")
             a("mat_ph = bpy.data.materials.new('Mat_PH_" + aname + "')")
             a("mat_ph.use_nodes = True")
             a("mat_ph.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (0.6, 0.5, 0.4, 1.0)")
             a("_ph.data.materials.append(mat_ph)")
             a("bpy.context.view_layer.update()")
+            a("    _placed_aabbs.append((" + str(pos) + ", [" + str(ph_size[0] * scl) + ", " + str(ph_size[1] * scl) + "])")
+            a(")")
         a("")
     a("bpy.ops.object.select_all(action='DESELECT')")
     a("")
 
-    # ═══ 导入装饰 ═══
+    # ═══ 导入装饰（含 AABB 碰撞检测） ═══
     a("# ── Import Decorations ──")
     for item in tpl.get("decorations", []):
         aname = item["asset"]
         pos = item.get("position", [0, 0, 0])
         rot = item.get("rotation", 0)
         scl = item.get("scale", 1.0)
+        meta = metadata.get(aname, {})
         a("# Decoration: " + aname)
         a("_aname = '" + aname + "'")
+        # AABB check before placing
+        a("_dec_pos = " + str(pos))
+        if meta.get("size"):
+            msize = meta["size"]
+            a("_dec_size = [" + str(msize[0] * scl) + ", " + str(msize[1] * scl) + "]")
+            a("_dec_offset = 0.0")
+            a("while _aabb_overlaps(_dec_pos, _dec_size, _placed_aabbs, margin=0.05) and _dec_offset < 3.0:")
+            a("    _dec_offset += 0.2")
+            a("    _dec_pos = (" + str(pos[0]) + ", " + str(pos[1]) + " + _dec_offset, " + str(pos[2]) + ")")
+            a("if _dec_offset > 0:")
+            a("    sys.stderr.write('[layout] " + aname + " shifted Y by ' + str(round(_dec_offset, 2)) + ' to avoid overlap\\\\n')")
         if aname in assets:
             apath = assets[aname]["path"]
             a("_apath = r'" + apath + "'")
@@ -634,25 +692,29 @@ def build_scene(
             a("    bpy.ops.import_scene.gltf(filepath=_glb[0])")
             a("_new = [o for o in bpy.context.scene.objects if o.name not in _prev]")
             a("if _new:")
-            a("    _new[0].location = mathutils.Vector(" + str(pos) + ")")
+            a("    _new[0].location = mathutils.Vector(_dec_pos)")
             a("    _new[0].rotation_euler = (0, 0, math.radians(" + str(rot) + "))")
             if scl != 1.0:
                 a("    _new[0].scale = (" + str(scl) + ", " + str(scl) + ", " + str(scl) + ")")
             a("    bpy.context.view_layer.update()")
             a("    sys.stderr.write('[layout] Imported " + aname + " (' + str(len(_new)) + ' objs)\\\\n')")
+            if meta.get("size"):
+                a("    _placed_aabbs.append((_dec_pos, [" + str(msize[0] * scl) + ", " + str(msize[1] * scl) + "]))")
         else:
+            ph_size = meta.get("size", [0.3, 0.3, 0.4])
             a("sys.stderr.write('[layout] WARNING: " + aname + " not available, using placeholder\\\\n')")
             a("bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=0.4)")
             a("_ph = bpy.context.active_object")
             a("_ph.name = 'Placeholder_" + aname + "'")
-            a("_ph.location = mathutils.Vector(" + str(pos) + ")")
+            a("_ph.location = mathutils.Vector(_dec_pos)")
             a("_ph.rotation_euler = (0, 0, math.radians(" + str(rot) + "))")
-            a("_ph.scale = (" + str(scl) + ", " + str(scl) + ", " + str(scl) + ")")
+            a("_ph.scale = (" + str(ph_size[0] * scl) + ", " + str(ph_size[1] * scl) + ", " + str(ph_size[2] * scl) + ")")
             a("mat_ph = bpy.data.materials.new('Mat_PH_" + aname + "')")
             a("mat_ph.use_nodes = True")
             a("mat_ph.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (0.3, 0.5, 0.3, 1.0)")
             a("_ph.data.materials.append(mat_ph)")
             a("bpy.context.view_layer.update()")
+            a("    _placed_aabbs.append((_dec_pos, [" + str(ph_size[0] * scl) + ", " + str(ph_size[1] * scl) + "]))")
         a("")
     a("bpy.ops.object.select_all(action='DESELECT')")
     a("")

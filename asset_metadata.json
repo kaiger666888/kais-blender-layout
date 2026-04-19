@@ -1,0 +1,125 @@
+{
+  "sofa_02": {
+    "type": "furniture",
+    "category": "seating",
+    "size": [1.78, 0.82, 0.88],
+    "interaction_zones": [
+      {"type": "seat", "surface_z": 0.45, "clearance": 0.05, "area": [0.6, 0.5]}
+    ],
+    "tags": ["seating", "living_room", "office"]
+  },
+  "decorative_book_set_01": {
+    "type": "decoration",
+    "category": "accessories",
+    "size": [0.4, 0.3, 0.15],
+    "tags": ["books", "decor", "shelf_item"]
+  },
+  "Television_01": {
+    "type": "furniture",
+    "category": "electronics",
+    "size": [1.2, 0.05, 0.7],
+    "tags": ["tv", "electronics", "living_room"]
+  },
+  "Lantern_01": {
+    "type": "prop",
+    "category": "lighting",
+    "size": [0.15, 0.15, 0.35],
+    "tags": ["lantern", "light", "decoration"]
+  },
+  "Camera_01": {
+    "type": "prop",
+    "category": "electronics",
+    "size": [0.15, 0.1, 0.1],
+    "tags": ["camera", "electronics", "prop"]
+  },
+  "potted_plant_01": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [0.3, 0.3, 1.2],
+    "tags": ["plant", "decoration", "floor"]
+  },
+  "potted_plant_02": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [0.25, 0.25, 0.9],
+    "tags": ["plant", "decoration", "floor"]
+  },
+  "potted_plant_04": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [0.35, 0.35, 1.0],
+    "tags": ["plant", "decoration", "floor"]
+  },
+  "fern_02": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [0.5, 0.5, 0.8],
+    "tags": ["plant", "decoration", "hanging"]
+  },
+  "marble_bust_01": {
+    "type": "decoration",
+    "category": "sculpture",
+    "size": [0.3, 0.3, 0.5],
+    "tags": ["sculpture", "decoration", "classical"]
+  },
+  "celandine_01": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [0.15, 0.15, 0.3],
+    "tags": ["flower", "plant", "decor"]
+  },
+  "fir_tree_01": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [1.5, 1.5, 4.0],
+    "tags": ["tree", "outdoor", "forest"]
+  },
+  "grass_bermuda_01": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [0.5, 0.5, 0.1],
+    "tags": ["grass", "outdoor", "ground"]
+  },
+  "grass_medium_01": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [0.5, 0.5, 0.15],
+    "tags": ["grass", "outdoor", "ground"]
+  },
+  "island_tree_01": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [2.0, 2.0, 3.5],
+    "tags": ["tree", "outdoor", "tropical"]
+  },
+  "island_tree_02": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [1.8, 1.8, 4.5],
+    "tags": ["tree", "outdoor", "tropical"]
+  },
+  "jacaranda_tree": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [3.0, 3.0, 6.0],
+    "tags": ["tree", "outdoor", "flowering"]
+  },
+  "rock_moss_set_01": {
+    "type": "decoration",
+    "category": "nature",
+    "size": [0.8, 0.6, 0.4],
+    "tags": ["rock", "nature", "outdoor"]
+  },
+  "rock_moss_set_02": {
+    "type": "decoration",
+    "category": "nature",
+    "size": [0.6, 0.5, 0.3],
+    "tags": ["rock", "nature", "outdoor"]
+  },
+  "tree_small_02": {
+    "type": "decoration",
+    "category": "plant",
+    "size": [1.2, 1.2, 2.5],
+    "tags": ["tree", "outdoor", "small"]
+  }
+}
